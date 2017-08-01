@@ -8,6 +8,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "MPC.h"
 #include "json.hpp"
+#include <cppad/cppad.hpp>
 
 // for convenience
 using json = nlohmann::json;
@@ -65,19 +66,33 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+Eigen::MatrixXd transform_points(vector<double> ptsx,
+                                 vector<double> ptsy,
+                                 vector<double> state) {
+  Eigen::MatrixXd t_pts(ptsx.size(), 2);
+  for (int i = 0; i < ptsx.size(); i++) {
+    auto diff_x = ptsx[i] - state[0];
+    auto diff_y = ptsy[i] - state[1];
+    auto psi = 0-state[2];
+    t_pts(i, 0) = diff_x * CppAD::cos(psi) - diff_y * CppAD::sin(psi);
+    t_pts(i, 1) = diff_x * CppAD::sin(psi) + diff_y * CppAD::cos(psi);
+  }
+  return t_pts;
+}
+
 int main() {
   uWS::Hub h;
 
   // MPC is initialized here!
   MPC mpc;
 
-  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> *ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    // cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -92,33 +107,43 @@ int main() {
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
 
-          /*
-          * TODO: Calculate steeering angle and throttle using MPC.
-          *
-          * Both are in between [-1, 1].
-          *
-          */
-          double steer_value;
-          double throttle_value;
+          // transform input to car-centered points
+          Eigen::MatrixXd transformed = transform_points(ptsx, ptsy, {px, py, psi});
+          Eigen::VectorXd coeffs = polyfit(transformed.col(0), transformed.col(1), POLY_ORDER);
+
+          // car is a 0 x and y on the transformed points coordinate
+          double cte = polyeval(coeffs, 0);
+
+          // the derivative due to the orientation perspective
+          double epsi = -CppAD::atan(coeffs[1]);
+
+          // setup the state
+          Eigen::VectorXd state(6);
+          state <<  v * 0.44704 * 0.1 * CppAD::cos(mpc.last_steering),
+            v * 0.44704 * 0.1 * CppAD::sin(mpc.last_steering),
+            0,
+            v * 0.44704, cte, epsi;
+
+          auto values = mpc.Solve(state, coeffs);
+ 
+          // Remember to divide by deg2rad(25) before you send the steering value back.
+          // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
+          auto steer_value = values[0] / deg2rad(25);
+          auto throttle_value = values[1];
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
-
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
-
-          msgJson["mpc_x"] = mpc_x_vals;
-          msgJson["mpc_y"] = mpc_y_vals;
+          msgJson["mpc_x"] = mpc.x_vals;
+          msgJson["mpc_y"] = mpc.y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
-
+          // https://stackoverflow.com/questions/26094379/typecasting-eigenvectorxd-to-stdvector
+          vector<double> next_x_vals(transformed.col(0).data(), transformed.col(0).data() + transformed.col(0).size());
+          vector<double> next_y_vals(transformed.col(1).data(), transformed.col(1).data() + transformed.col(1).size());
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
@@ -127,7 +152,7 @@ int main() {
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
@@ -135,15 +160,15 @@ int main() {
           // Feel free to play around with this value but should be to drive
           // around the track with 100ms latency.
           //
-          // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
+          // REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
           this_thread::sleep_for(chrono::milliseconds(100));
-          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          (*ws).send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
       } else {
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
-        ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+        (*ws).send(msg.data(), msg.length(), uWS::OpCode::TEXT);
       }
     }
   });
@@ -162,13 +187,13 @@ int main() {
     }
   });
 
-  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
+  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> *ws, uWS::HttpRequest req) {
     std::cout << "Connected!!!" << std::endl;
   });
 
-  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code,
+  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> *ws, int code,
                          char *message, size_t length) {
-    ws.close();
+    (*ws).close();
     std::cout << "Disconnected" << std::endl;
   });
 

@@ -6,10 +6,9 @@ cd uWebSockets
 patch CMakeLists.txt < ../cmakepatch.txt
 mkdir build
 export PKG_CONFIG_PATH=/usr/local/opt/openssl/lib/pkgconfig 
-cd build
-cmake ..
-make 
-sudo make install
+#cd build
+#cmake ..
+make && sudo make install
 cd ..
-cd ..
-sudo rm -r uWebSockets
+#cd ..
+#sudo rm -r uWebSockets
