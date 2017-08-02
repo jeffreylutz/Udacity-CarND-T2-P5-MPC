@@ -6,12 +6,6 @@ Self-Driving Car Engineer Nanodegree Program
 
 ## Model definition
 
-#### State:
-   * x position: x coordinate
-   * y position: y coordinate
-   * psi angle: vehicle orientation
-   * velocity:  vehicle velocity
-
 #### Actuators:
    * delta: steering angle
    * acceleration:  throttle and brake
@@ -19,6 +13,12 @@ Self-Driving Car Engineer Nanodegree Program
 #### Error Types:
    * cross track error
    * psi error
+
+#### State:
+   * x position: x coordinate
+   * y position: y coordinate
+   * psi angle: vehicle orientation
+   * velocity:  vehicle velocity
 
 ## Timestep Length and Elapsed Duration
 
